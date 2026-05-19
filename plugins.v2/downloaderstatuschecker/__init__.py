@@ -47,7 +47,7 @@ class DownloaderStatusChecker(_PluginBase):
         if config:
             self._enabled = config.get("enabled", False)
             self._onlyonce = config.get("onlyonce", False)
-            self._cron = config.get("cron", "0 */30 * * * ?")
+            self._cron = config.get("cron", "*/30 * * * *")
             self._selected_downloaders = config.get("selected_downloaders", [])
             self._notify_online = config.get("notify_online", True)
             self._notify_offline = config.get("notify_offline", True)
@@ -128,23 +128,25 @@ class DownloaderStatusChecker(_PluginBase):
                                             'model': 'selected_downloaders',
                                             'label': '检测的下载器',
                                             'multiple': True,
+                                            'clearable': True,
                                             'chips': True,
-                                            'items': downloader_options,
+                                            'items': [{"title": config.name, "value": config.name}
+                                                      for config in DownloaderHelper().get_configs().values()],
                                             'hint': '选择需要检测的下载器（留空则检测全部）',
                                         }
                                     }
                                 ]
-                            },
+                            },                                  
                             {
                                 'component': 'VCol',
-                                'props': {'cols': 12, 'md': 4},
+                                'props': {'cols': 12, 'md': 5},
                                 'content': [
                                     {
-                                        'component': 'VTextField',
+                                        'component': 'VCronField',
                                         'props': {
                                             'model': 'cron',
                                             'label': '检测周期 (Cron)',
-                                            'placeholder': '0 */30 * * * ?',
+                                            'placeholder': '*/30 * * * *',
                                             'hint': 'Cron表达式，默认每30分钟检测一次',
                                             'persistent-hint': True
                                         }
@@ -158,7 +160,7 @@ class DownloaderStatusChecker(_PluginBase):
                         'content': [
                             {
                                 'component': 'VCol',
-                                'props': {'cols': 12, 'md': 4},
+                                'props': {'cols': 12, 'md': 3},
                                 'content': [
                                     {
                                         'component': 'VSwitch',
@@ -173,7 +175,7 @@ class DownloaderStatusChecker(_PluginBase):
                             },
                             {
                                 'component': 'VCol',
-                                'props': {'cols': 12, 'md': 4},
+                                'props': {'cols': 12, 'md': 3},
                                 'content': [
                                     {
                                         'component': 'VSwitch',
@@ -185,16 +187,10 @@ class DownloaderStatusChecker(_PluginBase):
                                         }
                                     }
                                 ]
-                            }
-                        ]
-                    },
-                    # --- 新增：自动启动功能开关 ---
-                    {
-                        'component': 'VRow',
-                        'content': [
+                            },
                             {
-                                'component': 'VCol',
-                                'props': {'cols': 12, 'md': 4},
+                            'component': 'VCol',
+                                'props': {'cols': 12, 'md': 3},
                                 'content': [
                                     {
                                         'component': 'VSwitch',
@@ -208,8 +204,8 @@ class DownloaderStatusChecker(_PluginBase):
                                 ]
                             }
                         ]
-                    },
-                    # --- 新增：路径映射多行文本框 ---
+                    },   
+                    # --- 路径映射多行文本框 ---
                     {
                         'component': 'VRow',
                         'content': [
@@ -244,7 +240,7 @@ class DownloaderStatusChecker(_PluginBase):
                                         'props': {
                                             'type': 'info',
                                             'variant': 'tonal',
-                                            'text': 'Cron表达式说明：0 */30 * * * ? 表示每30分钟执行一次。自动启动仅支持Windows本地程序路径。'
+                                            'text': 'Cron表达式说明：*/30 * * * * 表示每30分钟执行一次。自动启动仅支持Windows本地程序路径。'
                                         }
                                     }
                                 ]
@@ -256,7 +252,7 @@ class DownloaderStatusChecker(_PluginBase):
         ], {
             "enabled": False,
             "onlyonce": False,
-            "cron": "0 */30 * * * ?",
+            "cron": "*/30 * * * *",
             "selected_downloaders": [],
             "notify_online": True,
             "notify_offline": True,
@@ -405,10 +401,23 @@ class DownloaderStatusChecker(_PluginBase):
                         exe_path = path_map.get(name)
                         if exe_path:
                             ok, start_msg = self._start_downloader(name, exe_path)
+                            # 发送通知
+                            self.post_message(
+                                title=f"已尝试启动下载器 [{name}]",
+                                text=f"程序路径：{exe_path}"
+                            )
                             if not ok:
                                 offline_list[-1] += f" (自动启动失败: {start_msg})"
+                                # 发送通知
+                                self.post_message(
+                                title=f" (自动启动失败: {start_msg})"
+                            )
                         else:
                             logger.debug(f"下载器 [{name}] 未配置启动路径，跳过自动启动")
+                             # 发送通知
+                            self.post_message(
+                                title=f"下载器 [{name}] 未配置启动路径，跳过自动启动"
+                            )
 
             # 发送通知
             if online_list and self._notify_online:
