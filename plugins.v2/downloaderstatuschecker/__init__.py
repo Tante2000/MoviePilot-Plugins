@@ -133,6 +133,7 @@ class DownloaderStatusChecker(_PluginBase):
                                             'items': [{"title": config.name, "value": config.name}
                                                       for config in DownloaderHelper().get_configs().values()],
                                             'hint': '选择需要检测的下载器（留空则检测全部）',
+                                            'persistent-hint': True
                                         }
                                     }
                                 ]
