@@ -2,9 +2,9 @@
   "DownloaderStatusChecker": {
     "name": "下载器状态检测",
     "description": "定时检测下载器在线状态，支持识别到下载器离线后自动启动下载器（Windows）",
-    "labels": "下载",
-    "version": "2.0.0",
-    "icon": "downloader.png",
+    "labels": "下载,监控",
+    "version": "1.0.0",
+    "icon": "downloaderstatuschecker.png",
     "author": "Tante",
     "level": 1,
     "history": {
