@@ -2,9 +2,11 @@ import time
 import subprocess
 import os
 import requests
-from datetime import datetime
+import pytz
+from datetime import datetime, timedelta
 from typing import List, Dict, Any, Tuple
-
+from app.core.config import settings
+from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from app.plugins import _PluginBase
 from app.log import logger
@@ -36,6 +38,7 @@ class DownloaderStatusChecker(_PluginBase):
     # 配置项
     _enabled = False
     _onlyonce = False
+    _scheduler = None
     _cron = ""
     _selected_downloaders = []
     _notify_online = True
@@ -282,7 +285,7 @@ class DownloaderStatusChecker(_PluginBase):
     # ------------------- 原有检测辅助方法 -------------------
     def _test_downloader_by_instance(self, helper, name):
         """尝试通过下载器实例的 test 方法检测（自动匹配方法名）"""
-        method_names = ['get_downloader', 'get', 'get_client', 'get_instance']
+        method_names = ['get_downloader', 'get', 'get_client']
         for method in method_names:
             if hasattr(helper, method):
                 try:
@@ -454,10 +457,12 @@ class DownloaderStatusChecker(_PluginBase):
             try:
                 CronTrigger.from_crontab(self._cron)
                 from app.scheduler import Scheduler
-                scheduler = Scheduler.get_instance()
+                scheduler = BackgroundScheduler(timezone=settings.TZ)
                 scheduler.add_job(
                     func=self._check_downloaders,
                     trigger=CronTrigger.from_crontab(self._cron),
+                    run_date=datetime.now(
+                        tz=pytz.timezone(settings.TZ)) + timedelta(seconds=3),
                     job_id="downloader_status_checker",
                     name="下载器状态检测"
                 )
@@ -468,7 +473,7 @@ class DownloaderStatusChecker(_PluginBase):
     def __stop_scheduler(self):
         try:
             from app.scheduler import Scheduler
-            scheduler = Scheduler.get_instance()
+            scheduler = BackgroundScheduler(timezone=settings.TZ)
             if scheduler:
                 scheduler.remove_job("downloader_status_checker")
                 logger.info("下载器状态检测任务已停止")
