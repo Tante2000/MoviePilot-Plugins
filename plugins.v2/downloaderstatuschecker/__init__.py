@@ -9,7 +9,7 @@ from apscheduler.triggers.cron import CronTrigger
 from app.plugins import _PluginBase
 from app.log import logger
 from app.helper.downloader import DownloaderHelper
-
+from app.schemas import NotificationType
 
 class DownloaderStatusChecker(_PluginBase):
     """
@@ -363,6 +363,7 @@ class DownloaderStatusChecker(_PluginBase):
             if not configs:
                 logger.warning("未找到任何下载器模块")
                 self.post_message(
+                    mtype=NotificationType.SiteMessage,
                     title="【下载器状态检测】",
                     text="未找到任何已配置的下载器"
                 )
@@ -404,6 +405,7 @@ class DownloaderStatusChecker(_PluginBase):
                             ok, start_msg = self._start_downloader(name, exe_path)
                             # 发送通知
                             self.post_message(
+                                mtype=NotificationType.SiteMessage,
                                 title=f"已尝试启动下载器 [{name}]",
                                 text=f"程序路径：{exe_path}"
                             )
@@ -411,12 +413,14 @@ class DownloaderStatusChecker(_PluginBase):
                                 offline_list[-1] += f" (自动启动失败: {start_msg})"
                                 # 发送通知
                                 self.post_message(
+                                mtype=NotificationType.SiteMessage,
                                 title=f" (自动启动失败: {start_msg})"
                             )
                         else:
                             logger.debug(f"下载器 [{name}] 未配置启动路径，跳过自动启动")
                              # 发送通知
                             self.post_message(
+                                mtype=NotificationType.SiteMessage,
                                 title=f"下载器 [{name}] 未配置启动路径，跳过自动启动"
                             )
 
@@ -424,12 +428,14 @@ class DownloaderStatusChecker(_PluginBase):
             if online_list and self._notify_online:
                 status_text = "\n".join([f"✅ {n}" for n in online_list])
                 self.post_message(
+                    mtype=NotificationType.SiteMessage,
                     title=f"【下载器状态检测】在线 ({len(online_list)}个)",
                     text=f"检测时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n{status_text}"
                 )
             if offline_list and self._notify_offline:
                 status_text = "\n".join([f"❌ {n}" for n in offline_list])
                 self.post_message(
+                    mtype=NotificationType.SiteMessage,
                     title=f"【下载器状态检测】离线 ({len(offline_list)}个)",
                     text=f"检测时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n{status_text}"
                 )
@@ -437,6 +443,7 @@ class DownloaderStatusChecker(_PluginBase):
         except Exception as e:
             logger.error(f"下载器状态检测失败：{str(e)}")
             self.post_message(
+                mtype=NotificationType.SiteMessage,
                 title="【下载器状态检测】异常",
                 text=f"检测过程发生异常：{str(e)}"
             )
