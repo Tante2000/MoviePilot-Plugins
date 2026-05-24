@@ -4,7 +4,7 @@
     "description": "定时检测下载器在线状态，支持识别到下载器离线后自动启动下载器（Windows）",
     "labels": "下载,监控",
     "version": "1.1.1",
-    "icon": "https://github.com/Tante2000/MoviePilot-Plugins/blob/main/icons/downloaderstatuschecker.png?raw=true",
+    "icon": "https://raw.githubusercontent.com/Tante2000/MoviePilot-Plugins/refs/heads/main/icons/downloaderstatuschecker.png",
     "author": "Tante",
     "level": 1,
     "history": {
