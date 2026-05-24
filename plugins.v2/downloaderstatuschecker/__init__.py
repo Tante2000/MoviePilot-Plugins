@@ -26,7 +26,7 @@ class DownloaderStatusChecker(_PluginBase):
     plugin_desc = "定时检测下载器在线状态，支持识别到下载器离线后自动启动下载器（Windows）"
     # 插件版本
     plugin_version = "1.1.1"
-    plugin_icon = "downloaderstatuschecker.png"
+    plugin_icon = "https://raw.githubusercontent.com/Tante2000/MoviePilot-Plugins/refs/heads/main/icons/downloaderstatuschecker.png"
     # 插件作者
     plugin_author = "Tante"
     # 作者URL
