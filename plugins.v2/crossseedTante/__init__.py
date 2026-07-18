@@ -179,7 +179,7 @@ class CrossSeed(_PluginBase):
     # 插件图标
     plugin_icon = "qingwa.png"
     # 插件版本
-    plugin_version = "3.0.3"
+    plugin_version = "3.0.4"
     # 插件作者
     plugin_author = "Tante"
     # 作者主页
@@ -413,8 +413,8 @@ class CrossSeed(_PluginBase):
             # 如果开启了定时任务，并且参数齐全
             if self._cron:
                 return [{
-                    "id": "CrossSeed",
-                    "name": "青蛙辅种助手",
+                    "id": "CrossSeedTante",
+                    "name": "青蛙辅种助手自用",
                     "trigger": CronTrigger.from_crontab(self._cron),
                     "func": self.auto_seed,
                     "kwargs": {}
@@ -429,8 +429,8 @@ class CrossSeed(_PluginBase):
                 ret_jobs = []
                 for trigger in triggers:
                     ret_jobs.append({
-                        "id": f"CrossSeed|{trigger.hour}:{trigger.minute}",
-                        "name": "青蛙辅种助手",
+                        "id": f"CrossSeedTante|{trigger.hour}:{trigger.minute}",
+                        "name": "青蛙辅种助手自用",
                         "trigger": "cron",
                         "func": self.auto_seed,
                         "kwargs": {
