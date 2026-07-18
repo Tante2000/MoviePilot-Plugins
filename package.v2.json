@@ -36,12 +36,12 @@
         "name": "青蛙辅种助手-跳过自用版",
         "description": "跳过校验，自用版",
         "labels": "做种",
-        "version": "3.0.3",
+        "version": "3.0.4",
         "icon": "qingwa.png",
         "author": "Tante",
         "level": 2,
         "history": {
-            "v3.0.3": "跳过校验，自用版"
+            "v3.0.4": "跳过校验，自用版"
         }
       }
 }
