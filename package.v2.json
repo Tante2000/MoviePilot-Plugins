@@ -31,5 +31,17 @@
             "v1.2": "优化CC同步时机;修正无头模式；尝试适配v2版本",
             "v1.1": "优化cookie获取方式;支持多个应用地址,用,号分隔应用网址。"
         }
+      },
+  "crossseedTante": {
+        "name": "青蛙辅种助手-跳过自用版",
+        "description": "跳过校验，自用版",
+        "labels": "做种",
+        "version": "3.0.3",
+        "icon": "qingwa.png",
+        "author": "Tante",
+        "level": 2,
+        "history": {
+            "v3.0.3": "跳过校验，自用版"
+        }
       }
 }
