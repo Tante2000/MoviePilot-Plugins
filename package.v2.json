@@ -18,7 +18,7 @@
         "version": "2.5.0",
         "icon": "https://github.com/suraxiuxiu/MoviePilot-Plugins/blob/main/icons/micon.png?raw=true",
         "author": "suraxiuxiu",
-        "level": 2,
+        "level": 1,
         "history": {
             "v2.5.0": "playwright迁移到cloakbrowser，需要v2.12.0以上版本支持",
             "v2.4.2": "修改网络超时判断机制",
@@ -39,7 +39,7 @@
         "version": "3.0.4",
         "icon": "qingwa.png",
         "author": "Tante",
-        "level": 2,
+        "level": 1,
         "history": {
             "v3.0.4": "跳过校验，自用版"
         }
