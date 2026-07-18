@@ -32,7 +32,7 @@
             "v1.1": "优化cookie获取方式;支持多个应用地址,用,号分隔应用网址。"
         }
       },
-  "crossseedTante": {
+  "CrossSeedTante": {
         "name": "青蛙辅种助手-跳过自用版",
         "description": "跳过校验，自用版",
         "labels": "做种",

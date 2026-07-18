@@ -171,7 +171,7 @@ class CrossSeedHelper(object):
         return remote_torrent_infos, None
 
 
-class CrossSeed(_PluginBase):
+class CrossSeedTante(_PluginBase):
     # 插件名称
     plugin_name = "青蛙辅种助手-跳过自用版"
     # 插件描述
