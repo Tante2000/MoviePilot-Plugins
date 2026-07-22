@@ -171,7 +171,7 @@ class CrossSeedHelper(object):
         return remote_torrent_infos, None
 
 
-class CrossSeedTante(_PluginBase):
+class CrossSeedT(_PluginBase):
     # 插件名称
     plugin_name = "青蛙自用"
     # 插件描述
@@ -185,7 +185,7 @@ class CrossSeedTante(_PluginBase):
     # 作者主页
     author_url = "https://qingwapt.com/"
     # 插件配置项ID前缀
-    plugin_config_prefix = "crossseedTante_"
+    plugin_config_prefix = "crossseedT_"
     # 加载顺序
     plugin_order = 17
     # 可使用的用户级别
