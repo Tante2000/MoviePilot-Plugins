@@ -34,9 +34,21 @@
       },
   "crossseedTante": {
         "name": "青蛙自用",
-        "description": "定",
-        "labels": "消息通知",
-        "version": "3.0.3.1"
+        "description": "青蛙自用支持跳过检验",
+        "labels": "辅种",
+        "version": "3.0.3.1",
+        "icon": "qingwa.png",
+        "author": "Tante",
+        "level": 1,
+        "system_version": ">=2.12.0",
+        "history": {
+            "v3.0.3.1": "修复部分站点无法跳过检验",
+            "v3.0.3": "修复部分站点无法跳过检验",
+            "v3.0.2": "修复部分站点无法跳过检验",
+            "v3.0.1": "修复部分站点无法跳过检验",
+            "v3.0": "修复部分站点无法跳过检验"
+        }
+
       
 
     }
