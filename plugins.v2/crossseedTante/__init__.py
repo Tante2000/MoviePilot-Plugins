@@ -173,9 +173,9 @@ class CrossSeedHelper(object):
 
 class CrossSeedTante(_PluginBase):
     # 插件名称
-    plugin_name = "青蛙辅种助手-跳过自用版"
+    plugin_name = "青蛙自用"
     # 插件描述
-    plugin_desc = "参考ReseedPuppy和IYUU辅种插件实现自动辅种，支持站点：青蛙、AGSVPT、麒麟、UBits、聆音、憨憨等。"
+    plugin_desc = "支持跳过检验"
     # 插件图标
     plugin_icon = "qingwa.png"
     # 插件版本
@@ -189,7 +189,7 @@ class CrossSeedTante(_PluginBase):
     # 加载顺序
     plugin_order = 17
     # 可使用的用户级别
-    auth_level = 2
+    auth_level = 1
 
     # 私有属性
     _scheduler = None
