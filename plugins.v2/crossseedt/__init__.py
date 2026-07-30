@@ -179,7 +179,7 @@ class CrossSeedT(_PluginBase):
     # 插件图标
     plugin_icon = "qingwa.png"
     # 插件版本
-    plugin_version = "3.0.3.1"
+    plugin_version = "3.0.3.2"
     # 插件作者
     plugin_author = "Tante"
     # 作者主页
@@ -513,6 +513,7 @@ class CrossSeedT(_PluginBase):
                                         'props': {
                                             'chips': True,
                                             'multiple': True,
+                                            'clearable': True,
                                             'model': 'sites',
                                             'label': '辅种站点',
                                             'items': site_options
