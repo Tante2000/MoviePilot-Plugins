@@ -24,7 +24,7 @@
         }
       },
   "crossseedt": {
-        "name": "青蛙自用",
+        "name": "青蛙自用版",
         "description": "青蛙自用支持跳过检验",
         "labels": "辅种",
         "version": "3.0.3.2",
@@ -37,7 +37,7 @@
             "v3.0.3.1": "改为自用版，增加默认跳过检验"
         },
   "QbSmartQueue": {
-        "name": "队列调度（按数量）自用版本",
+        "name": "队列调度（按数量）自用版",
         "description": "按并发下载数量动态调度 qBittorrent 队列，自动排队放行，防止磁盘爆满",
         "labels": "下载",
         "version": "3.0.0.1",
