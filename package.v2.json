@@ -11,7 +11,7 @@
       "v1.1.1": "定时检测下载器在线状态，支持识别到下载器离线后自动启动下载器（Windows）"
     }
   },
-  "WeWorkIPPW": {
+  "WeWorkIPPW-Tante": {
         "name": "企微配置自用版",
         "description": "适合docker用户使用",
         "labels": "消息通知",
@@ -23,7 +23,7 @@
             "v2.5.0.1": "改为自用版，playwright迁移到cloakbrowser，需要v2.12.0以上版本支持"
         }
       },
-  "crossseedt": {
+  "crossseedt-Tante": {
         "name": "青蛙自用版",
         "description": "青蛙自用支持跳过检验",
         "labels": "辅种",
@@ -37,7 +37,7 @@
             "v3.0.3.1": "改为自用版，增加默认跳过检验"
           }
        },
-  "QbSmartQueue": {
+  "QbSmartQueue-Tante": {
         "name": "队列调度（按数量）自用版",
         "description": "按并发下载数量动态调度 qBittorrent 队列，自动排队放行，防止磁盘爆满",
         "labels": "下载",
