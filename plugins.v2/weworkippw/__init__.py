@@ -30,9 +30,9 @@ class WeWorkIPPW(_PluginBase):
     # 插件版本
     plugin_version = "2.5.0.1"
     # 插件作者
-    plugin_author = "suraxiuxiu"
+    plugin_author = "Tante2000"
     # 作者主页
-    author_url = "https://github.com/suraxiuxiu/MoviePilot-Plugins"
+    author_url = "https://github.com/Tante2000"
     # 插件配置项ID前缀
     plugin_config_prefix = "weworkippw_"
     # 加载顺序

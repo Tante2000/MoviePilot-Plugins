@@ -5,7 +5,7 @@
     "labels": "下载,监控",
     "version": "1.1.1",
     "icon": "https://raw.githubusercontent.com/Tante2000/MoviePilot-Plugins/refs/heads/main/icons/downloaderstatuschecker.png",
-    "author": "Tante",
+    "author": "Tante2000",
     "level": 1,
     "history": {
       "v1.1.1": "定时检测下载器在线状态，支持识别到下载器离线后自动启动下载器（Windows）"
@@ -17,7 +17,7 @@
         "labels": "消息通知",
         "version": "2.5.0.1",
         "icon": "https://github.com/suraxiuxiu/MoviePilot-Plugins/blob/main/icons/micon.png?raw=true",
-        "author": "suraxiuxiu",
+        "author": "Tante2000",
         "level": 1,
         "history": {
             "v2.5.0.1": "改为自用版，playwright迁移到cloakbrowser，需要v2.12.0以上版本支持"
@@ -29,7 +29,7 @@
         "labels": "辅种",
         "version": "3.0.3.2",
         "icon": "qingwa.png",
-        "author": "Tante",
+        "author": "Tante2000",
         "level": 1,
         "system_version": ">=2.12.0",
         "history": {
