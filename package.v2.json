@@ -12,24 +12,15 @@
     }
   },
   "WeWorkIPPW": {
-        "name": "企微配置IPpw版",
-        "description": "!!docker用户用这个版本!!定时获取最新动态公网IP，配置到企业微信应用的可信IP列表里。使用playWright运行的版本,适合docker用户使用",
+        "name": "企微配置自用版",
+        "description": "适合docker用户使用",
         "labels": "消息通知",
-        "version": "2.5.0",
+        "version": "2.5.0.1",
         "icon": "https://github.com/suraxiuxiu/MoviePilot-Plugins/blob/main/icons/micon.png?raw=true",
         "author": "suraxiuxiu",
         "level": 1,
         "history": {
-            "v2.5.0": "playwright迁移到cloakbrowser，需要v2.12.0以上版本支持",
-            "v2.4.2": "修改网络超时判断机制",
-            "v2.4.1": "修改默认通知间隔",
-            "v2.4": "添加支持验证码功能，添加手动登录，更改通知机制",
-            "v2.3": "添加网络检测机制",
-            "v2.2": "修正通知方式,适配2.0",
-            "v2.1": "修正内置登录缓存BUG",
-            "v2.0": "添加内置扫码登录功能",
-            "v1.2": "优化CC同步时机;修正无头模式；尝试适配v2版本",
-            "v1.1": "优化cookie获取方式;支持多个应用地址,用,号分隔应用网址。"
+            "v2.5.0.1": "改为自用版，playwright迁移到cloakbrowser，需要v2.12.0以上版本支持"
         }
       },
   "crossseedt": {
@@ -43,10 +34,20 @@
         "system_version": ">=2.12.0",
         "history": {
             "v3.0.3.2": "辅种站点增加删除按钮",
-            "v3.0.3.1": "复刻原版辅种，增加默认跳过检验"
+            "v3.0.3.1": "改为自用版，增加默认跳过检验"
+        },
+  "QbSmartQueue": {
+        "name": "队列调度（按数量）自用版本",
+        "description": "按并发下载数量动态调度 qBittorrent 队列，自动排队放行，防止磁盘爆满",
+        "labels": "下载",
+        "version": "3.0.0.1",
+        "icon": "Qbittorrent_A.png",
+        "author": "Tante2000",
+        "level": 1,
+        "history": {
+            "v3.0.0.1": "改为自用版本，改为按数量调度，支持qBittorrent 5.0以上版本"
         }
-
-      
+      }
 
     }
 }

@@ -1,0 +1,1345 @@
+import threading
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import List, Tuple, Dict, Any, Optional
+
+import pytz
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+
+from app.core.config import settings
+from app.core.event import eventmanager, Event
+from app.helper.directory import DirectoryHelper
+from app.helper.downloader import DownloaderHelper
+from app.log import logger
+from app.plugins import _PluginBase
+from app.schemas import NotificationType, ServiceInfo
+from app.schemas.types import EventType
+from app.utils.string import StringUtils
+from app.utils.system import SystemUtils
+
+lock = threading.Lock()
+
+
+class QbSmartQueue(_PluginBase):
+    # 插件名称
+    plugin_name = "qBittorrent队列调度（按数量）自用版本"
+    # 插件描述
+    plugin_desc = "按并发下载数量动态调度 qBittorrent 队列，自动排队放行，防止磁盘爆满"
+    # 插件图标
+    plugin_icon = "Qbittorrent_A.png"
+    # 插件版本
+    plugin_version = "3.0.0.1"
+    # 插件作者
+    plugin_author = "Tante2000"
+    # 作者主页
+    author_url = "https://github.com/Tante2000"
+    # 插件配置项 ID 前缀
+    plugin_config_prefix = "qbsmartqueue_"
+    # 加载顺序
+    plugin_order = 5
+    # 可使用的用户级别
+    auth_level = 2
+
+    # 种子状态归类
+    _ACTIVE_DL_STATES = {
+        "downloading", "stalledDL", "metaDL",
+        "checkingDL", "forcedDL", "allocating",
+        "queuedDL",   # 已排队等待激活，占用容量名额，不可重复放行
+        "forcedMetaDL",
+    }
+    _PAUSED_DL_STATES = {
+        "pausedDL", "stoppedDL",
+    }
+    # 强制下载状态：用户手动强制，豁免暂停操作（仍计入容量）
+    _FORCED_DL_STATES = {
+        "forcedDL", "forcedMetaDL",
+    }
+
+    # 私有属性
+    _enabled: bool = False
+    _notify: bool = True
+    _onlyonce: bool = False
+    _cron: str = "*/2 * * * *"
+    _max_concurrent_count: int = 5          # 最大并发下载数量
+    _weight_wait: int = 5
+    _weight_size: int = 3
+    _weight_seeders: int = 3
+    _weight_progress: int = 2
+    _enable_low_speed_tolerance: bool = True
+    _low_speed_threshold_kib: int = 100
+    _low_speed_stalled_only: bool = False
+    _mponly: bool = True
+    _min_free_gb: float = 5
+    _enable_dead_seed_detection: bool = False
+    _dead_seed_confirmed_hours: float = 24
+    _dead_seed_action: str = "notify"       # "notify" | "pause"
+    _dead_seed_tag: str = "死种"
+
+    def init_plugin(self, config: dict = None):
+        self._event = threading.Event()
+        self._scheduler: Optional[BackgroundScheduler] = None
+        self._download_paths: list = []
+        self._downloaders: list = []
+        self._downloader_helper = DownloaderHelper()
+
+        if config:
+            self._enabled = config.get("enabled", False)
+            self._notify = config.get("notify", True)
+            self._onlyonce = config.get("onlyonce", False)
+            self._cron = config.get("cron") or "*/2 * * * *"
+            self._max_concurrent_count = int(config.get("max_concurrent_count") or 5)
+            self._weight_wait = int(config.get("weight_wait") or 5)
+            self._weight_size = int(config.get("weight_size") or 3)
+            self._weight_seeders = int(config.get("weight_seeders") or 3)
+            self._weight_progress = int(config.get("weight_progress") or 2)
+            self._enable_low_speed_tolerance = config.get(
+                "enable_low_speed_tolerance", True
+            )
+            self._low_speed_threshold_kib = int(
+                config.get("low_speed_threshold_kib") or 100
+            )
+            self._low_speed_stalled_only = config.get(
+                "low_speed_stalled_only", False
+            )
+            self._mponly = config.get("mponly", True)
+            self._download_paths = config.get("download_paths") or []
+            self._min_free_gb = float(config.get("min_free_gb") or 5)
+            self._downloaders = config.get("downloaders") or []
+            self._enable_dead_seed_detection = config.get("enable_dead_seed_detection", False)
+            self._dead_seed_confirmed_hours = float(config.get("dead_seed_confirmed_hours") or 24)
+            self._dead_seed_action = config.get("dead_seed_action") or "notify"
+            self._dead_seed_tag = config.get("dead_seed_tag", "死种")
+
+        self.stop_service()
+
+        if self._onlyonce:
+            self._scheduler = BackgroundScheduler(timezone=settings.TZ)
+            logger.info("qBittorrent 数量调度服务启动，立即运行一次")
+            self._scheduler.add_job(
+                func=self.manage_queue,
+                trigger="date",
+                run_date=datetime.now(tz=pytz.timezone(settings.TZ)) + timedelta(seconds=3),
+            )
+            self._onlyonce = False
+            self.update_config({
+                "enabled": self._enabled,
+                "notify": self._notify,
+                "onlyonce": False,
+                "cron": self._cron,
+                "max_concurrent_count": self._max_concurrent_count,
+                "weight_wait": self._weight_wait,
+                "weight_size": self._weight_size,
+                "weight_seeders": self._weight_seeders,
+                "weight_progress": self._weight_progress,
+                "enable_low_speed_tolerance": self._enable_low_speed_tolerance,
+                "low_speed_threshold_kib": self._low_speed_threshold_kib,
+                "low_speed_stalled_only": self._low_speed_stalled_only,
+                "mponly": self._mponly,
+                "download_paths": self._download_paths,
+                "min_free_gb": self._min_free_gb,
+                "downloaders": self._downloaders,
+                "enable_dead_seed_detection": self._enable_dead_seed_detection,
+                "dead_seed_confirmed_hours": self._dead_seed_confirmed_hours,
+                "dead_seed_action": self._dead_seed_action,
+                "dead_seed_tag": self._dead_seed_tag,
+            })
+            if self._scheduler.get_jobs():
+                self._scheduler.print_jobs()
+                self._scheduler.start()
+
+    def get_state(self) -> bool:
+        return True if self._enabled and self._cron and self._downloaders else False
+
+    @staticmethod
+    def get_command() -> List[Dict[str, Any]]:
+        return [
+            {
+                "cmd": "/smart_queue",
+                "event": EventType.PluginAction,
+                "desc": "立即执行 qBittorrent 数量调度",
+                "category": "qBittorrent",
+                "data": {"action": "smart_queue"},
+            }
+        ]
+
+    def get_api(self) -> List[Dict[str, Any]]:
+        pass
+
+    def get_service(self) -> List[Dict[str, Any]]:
+        """
+        注册插件公共服务
+        """
+        if self.get_state():
+            return [
+                {
+                    "id": "QbSmartQueue",
+                    "name": "qBittorrent 数量调度",
+                    "trigger": CronTrigger.from_crontab(self._cron),
+                    "func": self.manage_queue,
+                    "kwargs": {},
+                }
+            ]
+        return []
+
+    @property
+    def service_infos(self) -> Optional[Dict[str, ServiceInfo]]:
+        """
+        服务信息
+        """
+        if not self._downloaders:
+            logger.warning("尚未配置下载器，请检查配置")
+            return None
+
+        services = self._downloader_helper.get_services(name_filters=self._downloaders)
+        if not services:
+            logger.warning("获取下载器实例失败，请检查配置")
+            return None
+
+        active_services = {}
+        for service_name, service_info in services.items():
+            if service_info.instance.is_inactive():
+                logger.warning(f"下载器 {service_name} 未连接，请检查配置")
+            elif not self._downloader_helper.is_downloader(
+                service_type="qbittorrent", service=service_info
+            ):
+                logger.warning(f"下载器 {service_name} 不是 qBittorrent 类型，跳过")
+            else:
+                active_services[service_name] = service_info
+
+        if not active_services:
+            logger.warning("没有已连接的 qBittorrent 下载器，请检查配置")
+            return None
+
+        return active_services
+
+    @eventmanager.register(EventType.PluginAction)
+    def handle_smart_queue_command(self, event: Event):
+        """
+        处理远程命令
+        """
+        if not self._enabled:
+            return
+        if event:
+            event_data = event.event_data
+            if not event_data or event_data.get("action") != "smart_queue":
+                return
+        logger.info("收到远程命令，立即执行 qBittorrent 数量调度")
+        self.manage_queue()
+
+    @eventmanager.register(EventType.DownloadAdded)
+    def on_download_added(self, event: Event):
+        """
+        新下载添加后立即触发队列管理
+        """
+        if not self._enabled:
+            return
+        logger.info("检测到新下载任务，触发 qBittorrent 数量调度")
+        self.manage_queue()
+
+    def manage_queue(self):
+        """
+        核心调度逻辑：遍历所有已配置的 qBittorrent 下载器，分别执行队列管理
+        """
+        with lock:
+            services = self.service_infos
+            if not services:
+                return
+
+            for service_name, service_info in services.items():
+                try:
+                    self._manage_single_downloader(service_name, service_info)
+                except Exception as e:
+                    logger.error(f"处理下载器 {service_name} 时出错: {e}")
+
+    def _manage_single_downloader(
+        self, service_name: str, service_info: ServiceInfo
+    ):
+        """
+        对单个下载器执行队列管理（基于数量）
+        """
+        downloader = service_info.instance
+        max_concurrent = self._max_concurrent_count
+
+        # ── 1. 获取所有种子 ──
+        torrents, error = self._fetch_torrents(downloader)
+
+        if error:
+            logger.error(f"[{service_name}] 获取种子列表失败: {error}")
+            return
+
+        if not torrents:
+            logger.debug(f"[{service_name}] 没有种子")
+            return
+
+        path_free_space_map, disk_free_space_map, path_disk_map = (
+            self._get_free_space_maps()
+        )
+        matched_path_cache: Dict[str, Optional[str]] = {}
+
+        # ── 2. 磁盘空间检查（按种子 save_path 匹配监控目录，精准暂停） ──
+        low_space_paths: list = []
+        if path_free_space_map:
+            min_free_bytes = self._min_free_gb * (1024 ** 3)
+            low_space_paths = [
+                dp for dp, free_bytes in path_free_space_map.items()
+                if free_bytes < min_free_bytes
+            ]
+            for dp in low_space_paths:
+                logger.warning(
+                    f"[{service_name}] 目录 {dp} 所在磁盘剩余空间 "
+                    f"{StringUtils.str_filesize(path_free_space_map.get(dp, 0))} "
+                    f"低于阈值 {self._min_free_gb} GB"
+                )
+
+        if low_space_paths:
+            # 只暂停 save_path 属于低空间目录的活跃种子
+            paused_by_disk = []
+            paused_by_disk_ids = []
+            for t in torrents:
+                if t.get("state") not in self._ACTIVE_DL_STATES:
+                    continue
+                if t.get("state") in self._FORCED_DL_STATES:
+                    logger.debug(
+                        f"[{service_name}] 强制下载种子豁免磁盘暂停: {t.get('name', '')}"
+                    )
+                    continue
+                t_save = t.get("save_path", "")
+                if not t_save:
+                    continue
+
+                matched_path = matched_path_cache.get(t_save)
+                if matched_path is None and t_save not in matched_path_cache:
+                    matched_path = self._match_download_path(t_save)
+                    matched_path_cache[t_save] = matched_path
+
+                if matched_path and matched_path in low_space_paths:
+                    t_hash = t.get("hash")
+                    if not t_hash:
+                        continue
+                    paused_by_disk_ids.append(t_hash)
+                    paused_by_disk.append(t.get("name", ""))
+
+            self._stop_torrent_ids(downloader, paused_by_disk_ids)
+            if paused_by_disk:
+                logger.info(
+                    f"[{service_name}] 磁盘空间不足，暂停 {len(paused_by_disk)} 个种子"
+                )
+                if self._notify:
+                    self.post_message(
+                        mtype=NotificationType.SiteMessage,
+                        title="【qBittorrent 队列调度（数量）】",
+                        text=(
+                            f"下载器: {service_name}\n"
+                            f"磁盘空间不足目录: {', '.join(low_space_paths)}\n"
+                            f"已暂停 {len(paused_by_disk)} 个对应种子:\n"
+                            + ", ".join(paused_by_disk[:5])
+                        ),
+                    )
+                # 重新获取种子列表（状态已变化）
+                torrents, _ = self._fetch_torrents(downloader)
+                if not torrents:
+                    return
+
+        # ── 2.5 死种检测（保持不变） ──
+        import time as _time
+        all_hashes = {t.get("hash") for t in torrents if t.get("hash")}
+        dead_candidates = self._load_dead_candidates()
+        dead_confirmed = self._load_dead_confirmed()
+
+        dead_candidates = {h: ts for h, ts in dead_candidates.items() if h in all_hashes}
+        dead_confirmed &= all_hashes
+
+        newly_confirmed = []
+        if self._enable_dead_seed_detection:
+            now = _time.time()
+            threshold = self._dead_seed_confirmed_hours * 3600
+            for t in torrents:
+                t_hash = t.get("hash")
+                if not t_hash or t_hash in dead_confirmed:
+                    continue
+                if self._looks_dead(t):
+                    if t_hash not in dead_candidates:
+                        dead_candidates[t_hash] = now
+                        logger.debug(
+                            f"[{service_name}] 死种候选: {t.get('name', '')} 开始观察"
+                        )
+                    elif now - dead_candidates[t_hash] >= threshold:
+                        dead_confirmed.add(t_hash)
+                        del dead_candidates[t_hash]
+                        newly_confirmed.append(t)
+                        logger.info(
+                            f"[{service_name}] 确认死种: {t.get('name', '')} "
+                            f"(持续 {self._dead_seed_confirmed_hours}h 无响应)"
+                        )
+                else:
+                    if t_hash in dead_candidates:
+                        dead_candidates.pop(t_hash)
+                        logger.debug(
+                            f"[{service_name}] 死种候选重置: {t.get('name', '')} "
+                            f"(条件不再满足)"
+                        )
+
+        self._save_dead_candidates(dead_candidates)
+        self._save_dead_confirmed(dead_confirmed)
+
+        if newly_confirmed:
+            confirmed_ids = [t.get("hash") for t in newly_confirmed if t.get("hash")]
+            if self._dead_seed_tag and confirmed_ids:
+                downloader.set_torrents_tag(ids=confirmed_ids, tags=[self._dead_seed_tag])
+            if self._dead_seed_action == "pause":
+                self._stop_torrent_ids(downloader, confirmed_ids)
+                torrents, _ = self._fetch_torrents(downloader)
+                if not torrents:
+                    return
+            if self._notify:
+                self.post_message(
+                    mtype=NotificationType.SiteMessage,
+                    title="【qBittorrent 队列调度（数量）】",
+                    text=(
+                        f"下载器: {service_name}\n"
+                        f"检测到 {len(newly_confirmed)} 个死种:\n"
+                        + "\n".join(t.get("name", "") for t in newly_confirmed[:5])
+                    ),
+                )
+
+        # ── 3. 分类种子 ──
+        active_torrents = []
+        paused_torrents = []
+        for t in torrents:
+            state = t.get("state")
+            if state in self._ACTIVE_DL_STATES:
+                active_torrents.append(t)
+            elif state in self._PAUSED_DL_STATES:
+                paused_torrents.append(t)
+
+        active_count = len(active_torrents)
+
+        logger.info(
+            f"[{service_name}] 活跃下载: {active_count} 个, "
+            f"最大并发: {max_concurrent}, "
+            f"待调度: {len(paused_torrents)} 个"
+        )
+
+        # ── 4. 溢出保护：活跃下载超限则暂停评分最低的任务 ──
+        paused_by_overflow = []
+        if active_count > max_concurrent:
+            forced_torrents = [t for t in active_torrents if t.get("state") in self._FORCED_DL_STATES]
+            if forced_torrents:
+                logger.debug(
+                    f"[{service_name}] 溢出保护豁免 {len(forced_torrents)} 个强制下载种子"
+                )
+            overflow_candidates = [
+                t for t in active_torrents
+                if t.get("state") not in self._FORCED_DL_STATES
+            ]
+
+            # 低速宽容：优先暂停高速种子，保留低速种子（若启用）
+            if self._enable_low_speed_tolerance and self._low_speed_threshold_kib > 0:
+                normal_candidates = []
+                low_speed_candidates = []
+                for torrent in overflow_candidates:
+                    if self._is_low_speed_torrent(torrent):
+                        low_speed_candidates.append(torrent)
+                    else:
+                        normal_candidates.append(torrent)
+
+                if low_speed_candidates:
+                    tolerance_scope = "stalledDL" if self._low_speed_stalled_only else "全部活跃状态"
+                    logger.info(
+                        f"[{service_name}] 低速宽容生效：优先暂停高速种子，保留 {len(low_speed_candidates)} 个低速种子 "
+                        f"(阈值 {self._low_speed_threshold_kib} KiB/s, 范围 {tolerance_scope})"
+                    )
+                # 低速种子排在后面（即优先暂停普通种子）
+                overflow_candidates = normal_candidates + low_speed_candidates
+
+            # 按评分升序排列（评分低的优先暂停），使用 reverse=False
+            overflow_candidates = self._sort_by_weighted_score(overflow_candidates, reverse=False)
+
+            overflow_stop_ids = []
+            paused_low_speed_count = 0
+            for t in overflow_candidates:
+                if active_count <= max_concurrent:
+                    break
+                t_hash = t.get("hash")
+                if not t_hash:
+                    continue
+                t_name = t.get("name", "")
+                overflow_stop_ids.append(t_hash)
+                active_count -= 1
+                paused_by_overflow.append(t_name)
+                if self._is_low_speed_torrent(t):
+                    paused_low_speed_count += 1
+                logger.info(
+                    f"[{service_name}] 溢出保护：暂停 {t_name} "
+                    f"(当前活跃 {active_count + 1} -> {active_count})"
+                )
+
+            if paused_low_speed_count:
+                logger.warning(
+                    f"[{service_name}] 低速宽容回退：仍暂停 {paused_low_speed_count} 个低速种子以满足数量上限"
+                )
+
+            self._stop_torrent_ids(downloader, overflow_stop_ids)
+            # 重新获取种子状态
+            torrents, _ = self._fetch_torrents(downloader)
+            if torrents:
+                paused_torrents = [
+                    t for t in torrents
+                    if t.get("state") in self._PAUSED_DL_STATES
+                ]
+                active_torrents = [
+                    t for t in torrents
+                    if t.get("state") in self._ACTIVE_DL_STATES
+                ]
+                active_count = len(active_torrents)
+
+        # ── 5. 综合权重排序等待队列（评分高优先放行） ──
+        paused_torrents = self._sort_by_weighted_score(paused_torrents, reverse=True)
+
+        # ── 6. 放行逻辑 ──
+        released = []
+        skipped = []
+        skipped_disk = []
+        release_ids = []
+        for t in paused_torrents:
+            if active_count >= max_concurrent:
+                break
+
+            t_name = t.get("name", "")
+            t_hash = t.get("hash")
+            if not t_hash:
+                continue
+
+            # 跳过已确认死种
+            if t_hash in dead_confirmed:
+                logger.debug(f"[{service_name}] 跳过死种: {t_name}")
+                continue
+
+            t_save = t.get("save_path", "")
+            matched_path = matched_path_cache.get(t_save)
+            if matched_path is None and t_save not in matched_path_cache:
+                matched_path = self._match_download_path(t_save)
+                matched_path_cache[t_save] = matched_path
+
+            # 跳过 save_path 处于低空间磁盘的种子，不放行
+            if matched_path and matched_path in low_space_paths:
+                logger.debug(
+                    f"[{service_name}] 磁盘空间不足，跳过放行: {t_name} "
+                    f"(目录 {t_save})"
+                )
+                continue
+
+            # 磁盘空间预检
+            if not self._check_disk_budget(
+                needed=t.get("amount_left", 0),   # 仍需检查剩余体积，防止磁盘写满
+                disk_free_map=disk_free_space_map,
+                matched_path=matched_path,
+                path_disk_map=path_disk_map,
+            ):
+                skipped_disk.append(t_name)
+                logger.info(
+                    f"[{service_name}] 磁盘空间不足以容纳，跳过: {t_name} "
+                    f"(需要 {StringUtils.str_filesize(t.get('amount_left', 0))}, "
+                    f"目录 {t_save})"
+                )
+                continue
+
+            # 数量未超限，放行
+            release_ids.append(t_hash)
+            active_count += 1
+            # 扣减虚拟磁盘空间
+            self._deduct_disk_budget(
+                used=t.get("amount_left", 0),
+                disk_free_map=disk_free_space_map,
+                matched_path=matched_path,
+                path_disk_map=path_disk_map,
+            )
+            released.append(t_name)
+            logger.info(
+                f"[{service_name}] 放行: {t_name} "
+                f"(剩余 {StringUtils.str_filesize(t.get('amount_left', 0))}, "
+                f"当前活跃 {active_count})"
+            )
+
+        # ── 7. 防死锁：无活跃下载且有等待任务时，强制放行第一个（排除低空间目录） ──
+        if (
+            active_count == 0
+            and not released
+            and paused_torrents
+        ):
+            for candidate in paused_torrents:
+                c_save = candidate.get("save_path", "")
+                c_hash = candidate.get("hash")
+                if not c_hash:
+                    continue
+                c_name = candidate.get("name", "")
+                matched_path = matched_path_cache.get(c_save)
+                if matched_path is None and c_save not in matched_path_cache:
+                    matched_path = self._match_download_path(c_save)
+                    matched_path_cache[c_save] = matched_path
+
+                # 跳过低空间目录的种子
+                if matched_path and matched_path in low_space_paths:
+                    continue
+
+                # 磁盘空间安全检查
+                if not self._check_disk_budget(
+                    needed=candidate.get("amount_left", 0),
+                    disk_free_map=disk_free_space_map,
+                    matched_path=matched_path,
+                    path_disk_map=path_disk_map,
+                ):
+                    logger.warning(
+                        f"[{service_name}] 防死锁：磁盘空间不足，跳过 {c_name} "
+                        f"(需要 {StringUtils.str_filesize(candidate.get('amount_left', 0))}, 目录 {c_save})"
+                    )
+                    continue
+
+                release_ids.append(c_hash)
+                self._deduct_disk_budget(
+                    used=candidate.get("amount_left", 0),
+                    disk_free_map=disk_free_space_map,
+                    matched_path=matched_path,
+                    path_disk_map=path_disk_map,
+                )
+                active_count += 1
+                released.append(c_name)
+                logger.info(
+                    f"[{service_name}] 防死锁：强制放行 {c_name}"
+                )
+                break
+
+        self._start_torrent_ids(downloader, release_ids)
+
+        # ── 8. 通知 ──
+        if self._notify and (released or paused_by_overflow or skipped_disk):
+            text_parts = [f"下载器: {service_name}"]
+            if paused_by_overflow:
+                text_parts.append(
+                    f"溢出保护暂停 {len(paused_by_overflow)} 个: "
+                    + ", ".join(paused_by_overflow[:5])
+                )
+            if released:
+                text_parts.append(
+                    f"放行 {len(released)} 个: "
+                    + ", ".join(released[:5])
+                )
+            if skipped:
+                text_parts.append(f"容量不足跳过 {len(skipped)} 个")  # 此处的“容量”实际是数量，可保留
+            if skipped_disk:
+                text_parts.append(
+                    f"磁盘空间不足跳过 {len(skipped_disk)} 个: "
+                    + ", ".join(skipped_disk[:5])
+                )
+            text_parts.append(
+                f"当前活跃下载: {active_count} / {max_concurrent} 个"
+            )
+            self.post_message(
+                mtype=NotificationType.SiteMessage,
+                title="【qBittorrent 队列调度（数量）】",
+                text="\n".join(text_parts),
+            )
+
+    def _sort_by_weighted_score(self, torrents: List[dict], reverse: bool = True) -> List[dict]:
+        """
+        综合权重排序：按等待时间、体积、做种数、完成度四维度加权评分。
+        每个维度归一化到 0~1，乘以权重后求和，分数越高越优先。
+        :param reverse: True 表示降序（高分优先），False 表示升序（低分优先）
+        """
+        if not torrents:
+            return torrents
+
+        total_weight = (
+            self._weight_wait + self._weight_size
+            + self._weight_seeders + self._weight_progress
+        )
+        if total_weight <= 0:
+            # 所有权重为 0 时按添加时间兜底
+            return sorted(torrents, key=lambda x: x.get("added_on", 0), reverse=reverse)
+
+        # ── 收集各维度原始值 ──
+        added_on_list = [t.get("added_on", 0) for t in torrents]
+        size_list = [t.get("total_size", 0) for t in torrents]
+        seeders_list = [t.get("num_complete", 0) for t in torrents]
+        progress_list = []
+        for t in torrents:
+            total = t.get("total_size", 0)
+            left = t.get("amount_left", 0)
+            progress_list.append(
+                (total - left) / total if total > 0 else 0.0
+            )
+
+        # ── 归一化辅助函数 ──
+        def normalize(values: list, rev: bool = False) -> list:
+            """
+            将列表归一化到 0~1。rev=True 时值越小分越高。
+            """
+            min_v = min(values)
+            max_v = max(values)
+            span = max_v - min_v
+            if span == 0:
+                return [0.5] * len(values)
+            if rev:
+                return [(max_v - v) / span for v in values]
+            return [(v - min_v) / span for v in values]
+
+        # ── 归一化 ──
+        # 等待时间：added_on 越小（越早添加）分越高
+        norm_wait = normalize(added_on_list, rev=True)
+        # 体积：越小分越高
+        norm_size = normalize(size_list, rev=True)
+        # 做种数：越大分越高
+        norm_seeders = normalize(seeders_list, rev=False)
+        # 完成度：越高分越高
+        norm_progress = normalize(progress_list, rev=False)
+
+        # ── 加权求和 ──
+        scored = []
+        for i, t in enumerate(torrents):
+            score = (
+                self._weight_wait * norm_wait[i]
+                + self._weight_size * norm_size[i]
+                + self._weight_seeders * norm_seeders[i]
+                + self._weight_progress * norm_progress[i]
+            )
+            scored.append((score, t))
+
+        scored.sort(key=lambda x: x[0], reverse=reverse)
+
+        # 打印前3名（仅当 reverse=True 即高分优先时打印，否则打印最低的3个）
+        top_n = 3
+        if reverse:
+            top_items = scored[:top_n]
+            label = "高分"
+        else:
+            top_items = scored[:top_n]
+            label = "低分"
+        for rank, (score, t) in enumerate(top_items, 1):
+            idx = torrents.index(t)  # 获取索引用于打印归一化值
+            logger.info(
+                f"排队评分 #{rank} ({label}优先): {t.get('name', '')} "
+                f"(得分 {score:.2f}, "
+                f"等待 {norm_wait[idx]:.2f}, "
+                f"体积 {norm_size[idx]:.2f}, "
+                f"做种 {norm_seeders[idx]:.2f}, "
+                f"进度 {norm_progress[idx]:.2f})"
+            )
+
+        return [t for _, t in scored]
+
+    def _fetch_torrents(self, downloader: Any) -> Tuple[Optional[List[dict]], Optional[str]]:
+        if self._mponly:
+            return downloader.get_torrents(tags=settings.TORRENT_TAG)
+        return downloader.get_torrents()
+
+    @staticmethod
+    def _is_path_under_paths(save_path: str, paths: List[str]) -> bool:
+        if not save_path or not paths:
+            return False
+
+        for base_path in paths:
+            normalized_path = base_path.rstrip("/")
+            if save_path == normalized_path or save_path.startswith(normalized_path + "/"):
+                return True
+        return False
+
+    @staticmethod
+    def _get_download_speed_bps(torrent: Dict[str, Any]) -> int:
+        for field in ("dlspeed", "dl_speed", "download_speed"):
+            speed = torrent.get(field)
+            if isinstance(speed, (int, float)):
+                return max(int(speed), 0)
+        return 0
+
+    def _is_low_speed_torrent(self, torrent: Dict[str, Any]) -> bool:
+        if not self._enable_low_speed_tolerance:
+            return False
+        if self._low_speed_threshold_kib <= 0:
+            return False
+        if self._low_speed_stalled_only and torrent.get("state") != "stalledDL":
+            return False
+        threshold_bps = self._low_speed_threshold_kib * 1024
+        speed_bps = self._get_download_speed_bps(torrent)
+        return speed_bps <= threshold_bps
+
+    @staticmethod
+    def _looks_dead(torrent: Dict[str, Any]) -> bool:
+        """
+        瞬时死种判断：stalledDL + 全网无做种 + 零速度。
+        不含时间窗口，由调用方通过持续观察确认。
+        """
+        if torrent.get("state") != "stalledDL":
+            return False
+        if torrent.get("num_complete", 0) > 0:
+            return False
+        return QbSmartQueue._get_download_speed_bps(torrent) == 0
+
+    def _load_dead_candidates(self) -> Dict[str, float]:
+        """加载死种候选观察记录 {hash: 首次检测时间戳}"""
+        return dict(self.get_data("dead_seed_candidates") or {})
+
+    def _save_dead_candidates(self, data: Dict[str, float]):
+        self.save_data("dead_seed_candidates", data)
+
+    def _load_dead_confirmed(self) -> set:
+        """加载已确认死种哈希集合"""
+        return set(self.get_data("dead_seed_confirmed") or [])
+
+    def _save_dead_confirmed(self, data: set):
+        self.save_data("dead_seed_confirmed", list(data))
+
+    @staticmethod
+    def _stop_torrent_ids(downloader: Any, torrent_ids: List[str]):
+        valid_ids = [torrent_id for torrent_id in torrent_ids if torrent_id]
+        if valid_ids:
+            downloader.stop_torrents(ids=valid_ids)
+
+    @staticmethod
+    def _start_torrent_ids(downloader: Any, torrent_ids: List[str]):
+        valid_ids = [torrent_id for torrent_id in torrent_ids if torrent_id]
+        if valid_ids:
+            downloader.start_torrents(ids=valid_ids)
+
+    @staticmethod
+    def _get_disk_key(path: str) -> str:
+        """
+        获取路径所在磁盘设备标识。
+        优先使用 st_dev，避免同盘多目录被当成多份独立空间。
+        """
+        candidate = Path(path).expanduser()
+        for target in [candidate, *candidate.parents]:
+            try:
+                return f"dev:{target.stat().st_dev}"
+            except OSError:
+                continue
+        normalized_path = str(candidate).rstrip("/") or "/"
+        return f"path:{normalized_path}"
+
+    def _get_free_space_maps(
+        self,
+    ) -> Tuple[Dict[str, int], Dict[str, int], Dict[str, str]]:
+        """
+        获取监控目录当前磁盘剩余空间。
+        返回:
+        - path_free_map: {监控目录: 剩余字节}
+        - disk_free_map: {磁盘设备: 剩余字节}
+        - path_disk_map: {监控目录: 磁盘设备}
+        其中 disk_free_map 会在放行过程中动态扣减，用于追踪"虚拟剩余空间"。
+        """
+        path_free_map: Dict[str, int] = {}
+        disk_free_map: Dict[str, int] = {}
+        path_disk_map: Dict[str, str] = {}
+        if not self._download_paths:
+            return path_free_map, disk_free_map, path_disk_map
+        for dp in self._download_paths:
+            free_bytes = SystemUtils.free_space(Path(dp))
+            path_free_map[dp] = free_bytes
+            disk_key = self._get_disk_key(dp)
+            path_disk_map[dp] = disk_key
+            if disk_key in disk_free_map:
+                disk_free_map[disk_key] = min(disk_free_map[disk_key], free_bytes)
+            else:
+                disk_free_map[disk_key] = free_bytes
+            logger.debug(f"磁盘空间: {dp} -> {StringUtils.str_filesize(free_bytes)}")
+        return path_free_map, disk_free_map, path_disk_map
+
+    def _match_download_path(self, save_path: str) -> Optional[str]:
+        """
+        将种子的 save_path 匹配到监控目录列表中对应的路径。
+        返回匹配到的最具体监控路径，未匹配到返回 None。
+        """
+        if not self._download_paths or not save_path:
+            return None
+        matched_path = None
+        matched_length = -1
+        for dp in self._download_paths:
+            normalized_dp = dp.rstrip("/") or "/"
+            if save_path == normalized_dp or save_path.startswith(normalized_dp + "/"):
+                if len(normalized_dp) > matched_length:
+                    matched_path = dp
+                    matched_length = len(normalized_dp)
+        return matched_path
+
+    def _check_disk_budget(
+        self,
+        needed: int,
+        disk_free_map: Dict[str, int],
+        matched_path: Optional[str] = None,
+        path_disk_map: Optional[Dict[str, str]] = None,
+    ) -> bool:
+        """
+        检查 matched_path 所在磁盘能否容纳 needed 字节。
+        基于虚拟剩余空间 map 判断：放行后剩余空间必须 >= min_free_gb。
+        未配置监控目录或未匹配到监控目录时，默认放行。
+        """
+        if not disk_free_map:
+            return True
+        if matched_path is None:
+            return True  # save_path 不属于任何监控目录，跳过检查
+        disk_key = (
+            path_disk_map.get(matched_path)
+            if path_disk_map is not None else self._get_disk_key(matched_path)
+        )
+        available = disk_free_map.get(disk_key, 0)
+        min_free_bytes = self._min_free_gb * (1024 ** 3)
+        return (available - needed) >= min_free_bytes
+
+    def _deduct_disk_budget(
+        self,
+        used: int,
+        disk_free_map: Dict[str, int],
+        matched_path: Optional[str] = None,
+        path_disk_map: Optional[Dict[str, str]] = None,
+    ):
+        """
+        从虚拟空间 map 中扣减已放行种子的体积。
+        """
+        if matched_path is None:
+            return
+        disk_key = (
+            path_disk_map.get(matched_path)
+            if path_disk_map is not None else self._get_disk_key(matched_path)
+        )
+        if disk_key in disk_free_map:
+            disk_free_map[disk_key] -= used
+
+    def get_form(self) -> Tuple[List[dict], Dict[str, Any]]:
+        return [
+            {
+                "component": "VForm",
+                "content": [
+                    # ── 开关行 ──
+                    {
+                        "component": "VRow",
+                        "content": [
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 4},
+                                "content": [
+                                    {
+                                        "component": "VSwitch",
+                                        "props": {
+                                            "model": "enabled",
+                                            "label": "启用插件",
+                                        },
+                                    }
+                                ],
+                            },
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 4},
+                                "content": [
+                                    {
+                                        "component": "VSwitch",
+                                        "props": {
+                                            "model": "notify",
+                                            "label": "发送通知",
+                                        },
+                                    }
+                                ],
+                            },
+                            {
+                                'component': 'VCol',
+                                'props': {'cols': 12,'md': 3},
+                                'content': [
+                                    {
+                                        'component': 'VSwitch',
+                                        'props': {
+                                            'model': 'onlyonce',
+                                            'label': '立即运行一次',
+                                        }
+                                    }
+                                ],
+                           },
+                        ],
+                    },
+                    # ── 下载器选择 ──
+                    {
+                        "component": "VRow",
+                        "content": [
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12},
+                                "content": [
+                                    {
+                                        "component": "VSelect",
+                                        "props": {
+                                            "multiple": True,
+                                            "chips": True,
+                                            "clearable": True,
+                                            "model": "downloaders",
+                                            "label": "下载器",
+                                            "items": [
+                                                {
+                                                    "title": config.name,
+                                                    "value": config.name,
+                                                }
+                                                for config in self._downloader_helper
+                                                .get_configs()
+                                                .values()
+                                            ],
+                                        },
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                    # ── 执行周期 + 并发数量 ──
+                    {
+                        "component": "VRow",
+                        "content": [
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 6},
+                                "content": [
+                                    {
+                                        "component": "VCronField",
+                                        "props": {
+                                            "model": "cron",
+                                            "label": "执行周期",
+                                            "placeholder": "*/2 * * * *",
+                                        },
+                                    }
+                                ],
+                            },
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 6},
+                                "content": [
+                                    {
+                                        "component": "VTextField",
+                                        "props": {
+                                            "model": "max_concurrent_count",
+                                            "label": "最大并发下载数量",
+                                            "placeholder": "5",
+                                            "type": "number",
+                                        },
+                                    }
+                                ],
+                            },
+                        ],
+                    },
+                    # ── 排队权重 ──
+                    {
+                        "component": "VRow",
+                        "content": [
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 3},
+                                "content": [
+                                    {
+                                        "component": "VTextField",
+                                        "props": {
+                                            "model": "weight_wait",
+                                            "label": "等待时间权重",
+                                            "placeholder": "5",
+                                            "type": "number",
+                                            "hint": "等得越久越优先",
+                                        },
+                                    }
+                                ],
+                            },
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 3},
+                                "content": [
+                                    {
+                                        "component": "VTextField",
+                                        "props": {
+                                            "model": "weight_size",
+                                            "label": "体积权重",
+                                            "placeholder": "3",
+                                            "type": "number",
+                                            "hint": "越小越优先",
+                                        },
+                                    }
+                                ],
+                            },
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 3},
+                                "content": [
+                                    {
+                                        "component": "VTextField",
+                                        "props": {
+                                            "model": "weight_seeders",
+                                            "label": "做种数权重",
+                                            "placeholder": "3",
+                                            "type": "number",
+                                            "hint": "做种越多越优先",
+                                        },
+                                    }
+                                ],
+                            },
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 3},
+                                "content": [
+                                    {
+                                        "component": "VTextField",
+                                        "props": {
+                                            "model": "weight_progress",
+                                            "label": "完成度权重",
+                                            "placeholder": "2",
+                                            "type": "number",
+                                            "hint": "越接近完成越优先",
+                                        },
+                                    }
+                                ],
+                            },
+                        ],
+                    },
+                    # ── 仅 MP 任务 ──
+                    {
+                        "component": "VRow",
+                        "content": [
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 4},
+                                "content": [
+                                    {
+                                        "component": "VSwitch",
+                                        "props": {
+                                            "model": "mponly",
+                                            "label": "仅 MoviePilot 任务",
+                                        },
+                                    }
+                                ],
+                            },
+                        ],
+                    },
+                    # ── 低速宽容 ──
+                    {
+                        "component": "VRow",
+                        "content": [
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 4},
+                                "content": [
+                                    {
+                                        "component": "VSwitch",
+                                        "props": {
+                                            "model": "enable_low_speed_tolerance",
+                                            "label": "低速种子宽容",
+                                        },
+                                    }
+                                ],
+                            },
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 4},
+                                "content": [
+                                    {
+                                        "component": "VTextField",
+                                        "props": {
+                                            "model": "low_speed_threshold_kib",
+                                            "label": "低速阈值 (KiB/s)",
+                                            "placeholder": "100",
+                                            "type": "number",
+                                            "hint": "溢出保护时优先保留低于该速度的种子",
+                                        },
+                                    }
+                                ],
+                            },
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 4},
+                                "content": [
+                                    {
+                                        "component": "VSwitch",
+                                        "props": {
+                                            "model": "low_speed_stalled_only",
+                                            "label": "仅 stalledDL 生效",
+                                            "hint": "开启后仅对 stalledDL 状态应用低速宽容",
+                                        },
+                                    }
+                                ],
+                            },
+                        ],
+                    },
+                    # ── 磁盘保护 ──
+                    {
+                        "component": "VRow",
+                        "content": [
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 6},
+                                "content": [
+                                    {
+                                        "component": "VSelect",
+                                        "props": {
+                                            "multiple": True,
+                                            "chips": True,
+                                            "clearable": True,
+                                            "model": "download_paths",
+                                            "label": "监控下载目录 (磁盘空间检测)",
+                                            "items": [
+                                                {
+                                                    "title": d.download_path,
+                                                    "value": d.download_path,
+                                                }
+                                                for d in DirectoryHelper().get_local_download_dirs()
+                                                if d.download_path
+                                            ],
+                                            "hint": "不选则不检测磁盘空间",
+                                        },
+                                    }
+                                ],
+                            },
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 6},
+                                "content": [
+                                    {
+                                        "component": "VTextField",
+                                        "props": {
+                                            "model": "min_free_gb",
+                                            "label": "最低磁盘剩余空间 (GB)",
+                                            "placeholder": "5",
+                                            "type": "number",
+                                        },
+                                    }
+                                ],
+                            },
+                        ],
+                    },
+                    # ── 死种检测 ──
+                    {
+                        "component": "VRow",
+                        "content": [
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 3},
+                                "content": [
+                                    {
+                                        "component": "VSwitch",
+                                        "props": {
+                                            "model": "enable_dead_seed_detection",
+                                            "label": "启用死种检测",
+                                            "hint": "stalledDL + 全网无做种 + 零速度，持续超过阈值则确认",
+                                        },
+                                    }
+                                ],
+                            },
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 3},
+                                "content": [
+                                    {
+                                        "component": "VTextField",
+                                        "props": {
+                                            "model": "dead_seed_confirmed_hours",
+                                            "label": "确认阈值（小时）",
+                                            "placeholder": "24",
+                                            "type": "number",
+                                            "hint": "持续满足死种条件多少小时后确认",
+                                        },
+                                    }
+                                ],
+                            },
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 3},
+                                "content": [
+                                    {
+                                        "component": "VSelect",
+                                        "props": {
+                                            "model": "dead_seed_action",
+                                            "label": "确认后动作",
+                                            "items": [
+                                                {"title": "仅通知", "value": "notify"},
+                                                {"title": "暂停", "value": "pause"},
+                                            ],
+                                        },
+                                    }
+                                ],
+                            },
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 3},
+                                "content": [
+                                    {
+                                        "component": "VTextField",
+                                        "props": {
+                                            "model": "dead_seed_tag",
+                                            "label": "qBittorrent 标签",
+                                            "placeholder": "死种",
+                                            "hint": "确认死种后打的标签，留空则不打标签",
+                                        },
+                                    }
+                                ],
+                            },
+                        ],
+                    },
+                    # ── 说明 ──
+                    {
+                        "component": "VRow",
+                        "content": [
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12},
+                                "content": [
+                                    {
+                                        "component": "VAlert",
+                                        "props": {
+                                            "type": "info",
+                                            "variant": "tonal",
+                                            "text": (
+                                                "根据当前活跃下载任务数量动态管理 qBittorrent 队列：\n\n"
+                                                "1. 溢出保护：活跃下载超限时暂停评分最低的任务\n\n"
+                                                "2. 综合排序：按等待时间、体积、做种数、完成度加权评分，逐个放行（评分高优先）\n\n"
+                                                "3. 防死锁：无活跃下载时强制放行第一个\n\n"
+                                                "4. 磁盘保护：剩余空间低于阈值时暂停对应目录下载\n\n"
+                                                "5. 低速宽容：溢出保护优先保留低速种子\n\n"
+                                                "6. 死种检测：持续无响应的种子打标签/暂停，不再占用队列槽位\n\n"
+                                                "权重说明：每个维度 0~10，0 = 不参与排序，值越大影响越大"
+                                            ),
+                                        },
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                ],
+            }
+        ], {
+            "enabled": False,
+            "notify": True,
+            "onlyonce": False,
+            "cron": "*/2 * * * *",
+            "max_concurrent_count": 5,
+            "weight_wait": 5,
+            "weight_size": 3,
+            "weight_seeders": 3,
+            "weight_progress": 2,
+            "enable_low_speed_tolerance": True,
+            "low_speed_threshold_kib": 100,
+            "low_speed_stalled_only": False,
+            "mponly": True,
+            "download_paths": [],
+            "min_free_gb": 5,
+            "downloaders": [],
+            "enable_dead_seed_detection": False,
+            "dead_seed_confirmed_hours": 24,
+            "dead_seed_action": "notify",
+            "dead_seed_tag": "死种",
+        }
+
+    def get_page(self) -> List[dict]:
+        pass
+
+    def stop_service(self):
+        """
+        退出插件
+        """
+        try:
+            if self._scheduler:
+                self._scheduler.remove_all_jobs()
+                if self._scheduler.running:
+                    self._event.set()
+                    self._scheduler.shutdown()
+                    self._event.clear()
+                self._scheduler = None
+        except Exception as e:
+            logger.error(f"qBittorrent 数量调度停止服务异常: {e}")
