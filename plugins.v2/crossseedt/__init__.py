@@ -175,7 +175,7 @@ class CrossSeedT(_PluginBase):
     # 插件名称
     plugin_name = "青蛙自用"
     # 插件描述
-    plugin_desc = "支持跳过检验"
+    plugin_desc = "支持跳过检验检查"
     # 插件图标
     plugin_icon = "qingwa.png"
     # 插件版本
