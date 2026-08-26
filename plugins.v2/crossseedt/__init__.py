@@ -179,7 +179,7 @@ class CrossSeedT(_PluginBase):
     # 插件图标
     plugin_icon = "qingwa.png"
     # 插件版本
-    plugin_version = "3.0.3.2"
+    plugin_version = "3.0.3.3"
     # 插件作者
     plugin_author = "Tante"
     # 作者主页
@@ -1172,6 +1172,7 @@ class CrossSeedT(_PluginBase):
         logger.info(f"添加下载任务：{tor.get_name_id_tag()} ...")
         download_id = self.__download(service=service,
                                       content=content,
+                                      is_paused=True,
                                       save_path=save_path)
         if not download_id:
             # 下载失败
