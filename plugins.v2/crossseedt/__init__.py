@@ -1185,8 +1185,8 @@ class CrossSeedT(_PluginBase):
             self.success += 1
             logger.info(f"添加校验检查任务：{download_id} ...")
             if service.type == "qbittorrent":
-                # downloader_obj.recheck_torrents(ids=[download_id])
-               # self.__add_recheck_torrents(service, download_id)
+                downloader_obj.recheck_torrents(ids=[download_id])
+                self.__add_recheck_torrents(service, download_id)
             else:
                 self.__add_recheck_torrents(service, download_id)
             # 下载成功
@@ -1199,6 +1199,7 @@ class CrossSeedT(_PluginBase):
         # 追加校验任务
         logger.info(f"添加校验检查任务：{download_id} ...")
         if not self._recheck_torrents.get(service.name):
+            return True
             #self._recheck_torrents[service.name] = []
         self._recheck_torrents[service.name].append(download_id)
 
