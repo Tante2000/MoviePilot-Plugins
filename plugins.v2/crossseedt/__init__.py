@@ -920,7 +920,7 @@ class CrossSeedT(_PluginBase):
             if hash_strs:
                 self.__seed_torrents(hash_strs=hash_strs, service=service)
                 # 触发校验检查
-                self.check_recheck()
+                #self.check_recheck()
             else:
                 logger.info("没有需要辅种的种子")
         # 保存缓存
@@ -1107,7 +1107,7 @@ class CrossSeedT(_PluginBase):
             # 添加任务
             torrent = service.instance.add_torrent(content=content,
                                                    download_dir=save_path,
-                                                   is_paused=True,
+                                             
                                                    labels=["已整理", "辅种"])
             if not torrent:
                 return None
@@ -1172,7 +1172,7 @@ class CrossSeedT(_PluginBase):
         logger.info(f"添加下载任务：{tor.get_name_id_tag()} ...")
         download_id = self.__download(service=service,
                                       content=content,
-                                      is_paused=True,
+                                     
                                       save_path=save_path)
         if not download_id:
             # 下载失败
@@ -1185,8 +1185,8 @@ class CrossSeedT(_PluginBase):
             self.success += 1
             logger.info(f"添加校验检查任务：{download_id} ...")
             if service.type == "qbittorrent":
-                downloader_obj.recheck_torrents(ids=[download_id])
-                self.__add_recheck_torrents(service, download_id)
+                # downloader_obj.recheck_torrents(ids=[download_id])
+               # self.__add_recheck_torrents(service, download_id)
             else:
                 self.__add_recheck_torrents(service, download_id)
             # 下载成功
@@ -1199,7 +1199,7 @@ class CrossSeedT(_PluginBase):
         # 追加校验任务
         logger.info(f"添加校验检查任务：{download_id} ...")
         if not self._recheck_torrents.get(service.name):
-            self._recheck_torrents[service.name] = []
+            #self._recheck_torrents[service.name] = []
         self._recheck_torrents[service.name].append(download_id)
 
     @staticmethod
