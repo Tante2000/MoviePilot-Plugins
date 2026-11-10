@@ -11,5 +11,19 @@
     "history": {
       "v1.1.1": "首次发布。"
     }
+  },
+  {  
+    "wxppw": {
+        "name": "企微配置自用",
+        "description": "适合docker用户使用",
+        "labels": "消息通知",
+        "version": "3.0",
+        "icon": "https://github.com/suraxiuxiu/MoviePilot-Plugins/blob/main/icons/micon.png?raw=true",
+        "author": "Tante2000",
+        "level": 1,
+        "history": {
+            "v3.0": "改为自用版，playwright迁移到cloakbrowser，需要v2.12.0以上版本支持"
+        }
+  
   }
 }
