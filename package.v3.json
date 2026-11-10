@@ -21,6 +21,7 @@
         "icon": "https://github.com/suraxiuxiu/MoviePilot-Plugins/blob/main/icons/micon.png?raw=true",
         "author": "Tante2000",
         "level": 1,
+      "system_version": ">=3.0.0",
         "history": {
             "v3.0": "改为自用版，playwright迁移到cloakbrowser，需要v2.12.0以上版本支持"
         }
