@@ -12,7 +12,7 @@
       "v1.1.1": "首次发布。"
     }
   },
-  "wppw": {
+  "wxppw": {
     "name": "企微配置自用",
     "description": "适合docker用户使用",
     "labels": "消息通知",
