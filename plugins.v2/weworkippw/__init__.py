@@ -20,7 +20,7 @@ from app.helper.cookiecloud import CookieCloudHelper
 from cloakbrowser import launch
 
 
-class weworkippw(_PluginBase):
+class WeWorkIPPW(_PluginBase):
     # 插件名称
     plugin_name = "企微配置IPpw版"
     # 插件描述
